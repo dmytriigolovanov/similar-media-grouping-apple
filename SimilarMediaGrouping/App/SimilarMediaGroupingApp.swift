@@ -10,6 +10,16 @@ import SwiftUI
 
 @main
 struct SimilarMediaGroupingApp: App {
+    private let container: AppContainer
+
+    init() {
+        do {
+            self.container = try AppContainer()
+        } catch {
+            fatalError("Failed to initialize AppContainer: \(error)")
+        }
+    }
+    
     var body: some Scene {
         WindowGroup {
             // TODO: remove content view placeholder
