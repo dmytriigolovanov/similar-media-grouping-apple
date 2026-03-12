@@ -1,5 +1,5 @@
 //
-//  SimilarMediaGroup.swift
+//  StoredMediaGroup.swift
 //  SimilarMediaGrouping
 //
 //  Created by Dmytrii Golovanov on 12.03.2026.
@@ -7,15 +7,14 @@
 //
 
 import Foundation
+import SwiftData
 
-struct SimilarMediaGroup: Identifiable {
-    let id: UUID
+@Model
+final class StoredMediaGroup {
+    var id: UUID
     var assetIdentifiers: [String]
-    
-    init(
-        id: UUID = UUID(),
-        assetIdentifiers: [String]
-    ) {
+
+    init(id: UUID = UUID(), assetIdentifiers: [String]) {
         self.id = id
         self.assetIdentifiers = assetIdentifiers
     }
