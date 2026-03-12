@@ -11,6 +11,9 @@ internal import Photos
 
 protocol PhotoLibraryManager {
     var authorizationStatus: PHAuthorizationStatus { get }
+    var isAuthorizationDetermined: Bool { get }
+    var isAuthorized: Bool { get }
+    var isAccessLimited: Bool { get }
     
     @discardableResult
     func requestAuthorization() async -> PHAuthorizationStatus
@@ -33,7 +36,16 @@ extension PhotoLibraryManager {
 final class DefaultPhotoLibraryManager: PhotoLibraryManager {
     
     var authorizationStatus: PHAuthorizationStatus {
-        PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        return PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    }
+    var isAuthorizationDetermined: Bool {
+        return authorizationStatus != .notDetermined
+    }
+    var isAuthorized: Bool {
+        return authorizationStatus == .authorized || authorizationStatus == .limited
+    }
+    var isAccessLimited: Bool {
+        return authorizationStatus == .limited
     }
     
     @discardableResult

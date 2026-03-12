@@ -29,7 +29,6 @@ final class DefaultSimilarMediaManager: SimilarMediaManager {
     
     // MARK: Init
     
-    
     init(
         photoLibraryManager: PhotoLibraryManager,
         mediaLoadingService: MediaLoadingService,
@@ -108,6 +107,7 @@ final class DefaultSimilarMediaManager: SimilarMediaManager {
             }
         }
     }
+    
     private func removeDeletedAssets(
         from groups: [SimilarMediaGroup],
         existingIdentifiers: Set<String>
