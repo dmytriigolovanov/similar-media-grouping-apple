@@ -9,5 +9,9 @@
 import Foundation
 
 final class AppContainer {
+    let photoLibraryManager: PhotoLibraryManager
     
+    init() {
+        self.photoLibraryManager = DefaultPhotoLibraryManager()
+    }
 }
