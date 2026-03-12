@@ -11,10 +11,12 @@ import SwiftUI
 @main
 struct SimilarMediaGroupingApp: App {
     private let container: AppContainer
+    private let coordinator: AppCoordinator
 
     init() {
         do {
             self.container = try AppContainer()
+            self.coordinator = AppCoordinator(container: container)
         } catch {
             fatalError("Failed to initialize AppContainer: \(error)")
         }
@@ -22,14 +24,27 @@ struct SimilarMediaGroupingApp: App {
     
     var body: some Scene {
         WindowGroup {
-            // TODO: remove content view placeholder
-            ContentView()
+            if self.coordinator.shouldShowOnboarding {
+                onboardingView
+            }
+            else {
+                mediaGroupsView
+            }
         }
     }
-}
-
-struct ContentView: View {
-    var body: some View {
+    
+    private var onboardingView: some View {
+        OnboardingView(
+            viewModel: OnboardingViewModel(
+                photoLibraryManager: container.photoLibraryManager,
+                onCompleted: coordinator.onOnboardingCompleted,
+                onOpenSettings: coordinator.onOpenSettings
+            )
+        )
+    }
+    
+    private var mediaGroupsView: some View {
+        // TODO: Media Groups UI
         VStack {
             Image(systemName: "globe")
                 .imageScale(.large)
@@ -38,8 +53,4 @@ struct ContentView: View {
         }
         .padding()
     }
-}
-
-#Preview {
-    ContentView()
 }
