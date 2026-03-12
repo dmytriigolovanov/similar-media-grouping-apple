@@ -8,9 +8,13 @@
 
 import Foundation
 
-struct SimilarMediaGroup: Identifiable {
+struct SimilarMediaGroup: Identifiable, Hashable {
     let id: UUID
     var assetIdentifiers: [String]
+    
+    var count: Int {
+        assetIdentifiers.count
+    }
     
     init(
         id: UUID = UUID(),

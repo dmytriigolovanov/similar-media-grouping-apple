@@ -10,6 +10,9 @@ import Foundation
 internal import Photos
 
 protocol SimilarMediaManager {
+    var totalMediaCount: Int { get }
+    var processedMediaCount: Int { get }
+    
     func fetchSimilarMedia() -> AsyncThrowingStream<[SimilarMediaGroup], Error>
 }
 
@@ -26,6 +29,14 @@ final class DefaultSimilarMediaManager: SimilarMediaManager {
     private let batchSize: Int = 100
     private let threshold: Float = 0.8
     private let imageSize = CGSize(width: 224, height: 224)
+    
+    var totalMediaCount: Int {
+        return photoLibraryManager.fetchAllAssetsCount()
+    }
+    
+    var processedMediaCount: Int {
+        return processedIdentifiers.count
+    }
     
     // MARK: Init
     

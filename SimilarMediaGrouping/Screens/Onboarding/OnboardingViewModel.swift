@@ -58,7 +58,12 @@ final class OnboardingViewModel {
             authorizationResult = nil
         }
         else if photoLibraryManager.isAuthorized {
-            authorizationResult = photoLibraryManager.isAccessLimited ? .limited : .authorized
+            guard photoLibraryManager.isAccessLimited else {
+                authorizationResult = .authorized
+                onCompleted()
+                return
+            }
+            authorizationResult = .limited
         }
         else {
             authorizationResult = .denied

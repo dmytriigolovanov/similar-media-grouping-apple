@@ -28,7 +28,7 @@ struct SimilarMediaGroupingApp: App {
                 onboardingView
             }
             else {
-                mediaGroupsView
+                groupsView
             }
         }
     }
@@ -43,14 +43,11 @@ struct SimilarMediaGroupingApp: App {
         )
     }
     
-    private var mediaGroupsView: some View {
-        // TODO: Media Groups UI
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+    private var groupsView: some View {
+        GroupsView(
+            viewModel: GroupsViewModel(
+                similarMediaManager: container.similarMediaManager
+            )
+        )
     }
 }

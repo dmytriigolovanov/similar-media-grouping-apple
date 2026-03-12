@@ -36,7 +36,7 @@ struct OnboardingView: View {
             case .none:
                 grantAccessButton
             case .authorized:
-                letsStartButton
+                EmptyView()
             case .limited:
                 limitedAccessView
             case .denied:
