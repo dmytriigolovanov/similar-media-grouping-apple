@@ -1,0 +1,110 @@
+//
+//  SimilarMediaManager.swift
+//  SimilarMediaGrouping
+//
+//  Created by Dmytrii Golovanov on 12.03.2026.
+//  Copyright © 2026 Dmytrii Golovanov. All rights reserved.
+//
+
+import Foundation
+internal import Photos
+
+protocol SimilarMediaManager {
+    func fetchSimilarMedia() -> AsyncThrowingStream<[SimilarMediaGroup], Error>
+}
+
+final class DefaultSimilarMediaManager: SimilarMediaManager {
+
+    private let photoLibraryManager: PhotoLibraryManager
+    private let mediaLoadingService: MediaLoadingService
+    private let groupingService: SimilarMediaGroupingService
+
+    private var processedIdentifiers: Set<String> = []
+    private var groups: [SimilarMediaGroup] = []
+
+    private let batchSize: Int = 100
+    private let threshold: Float = 0.8
+    private let imageSize = CGSize(width: 224, height: 224)
+
+    // MARK: Init
+
+    init(
+        photoLibraryManager: PhotoLibraryManager,
+        mediaLoadingService: MediaLoadingService,
+        groupingService: SimilarMediaGroupingService = DefaultSimilarMediaGroupingService()
+    ) {
+        self.photoLibraryManager = photoLibraryManager
+        self.mediaLoadingService = mediaLoadingService
+        self.groupingService = groupingService
+    }
+
+    // MARK: Fetch
+
+    func fetchSimilarMedia() -> AsyncThrowingStream<[SimilarMediaGroup], Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    let currentIdentifiers = Set(
+                        photoLibraryManager.fetchAssets(
+                            mediaType: .image,
+                            batchSize: Int.max,
+                            offset: 0
+                        ).map {
+                            $0.localIdentifier
+                        }
+                    )
+
+                    groups = removeDeletedAssets(
+                        from: groups,
+                        existingIdentifiers: currentIdentifiers
+                    )
+                    processedIdentifiers = processedIdentifiers.intersection(currentIdentifiers)
+
+                    let unprocessed = Array(currentIdentifiers.subtracting(processedIdentifiers))
+
+                    guard !unprocessed.isEmpty else {
+                        continuation.yield(groups)
+                        continuation.finish()
+                        return
+                    }
+
+                    for batch in unprocessed.chunked(into: batchSize) {
+                        let assets = photoLibraryManager.fetchAssets(byIdentifiers: batch)
+
+                        var images: [(identifier: String, image: CGImage)] = []
+                        for asset in assets {
+                            guard let cgImage = try await mediaLoadingService.loadCGImage(for: asset, size: imageSize) else {
+                                continue
+                            }
+                            images.append((asset.localIdentifier, cgImage))
+                        }
+
+                        let newGroups = try await groupingService.buildGroups(
+                            from: images,
+                            threshold: threshold
+                        )
+
+                        processedIdentifiers.formUnion(batch)
+                        groups.append(contentsOf: newGroups)
+                        continuation.yield(groups)
+                    }
+
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func removeDeletedAssets(
+        from groups: [SimilarMediaGroup],
+        existingIdentifiers: Set<String>
+    ) -> [SimilarMediaGroup] {
+        groups.compactMap { group in
+            let validIdentifiers = group.assetIdentifiers.filter { existingIdentifiers.contains($0) }
+            guard validIdentifiers.count > 1 else { return nil }
+            return SimilarMediaGroup(assetIdentifiers: validIdentifiers)
+        }
+    }
+}
