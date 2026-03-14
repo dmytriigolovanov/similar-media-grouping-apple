@@ -7,21 +7,16 @@
 //
 
 import Foundation
+internal import SimilarMediaKit
 
 final class AppContainer {
     let photoLibraryManager: PhotoLibraryManager
-    let mediaLoadingService: MediaLoadingService
-    let storageService: SimilarMediaStorageService
     let similarMediaManager: SimilarMediaManager
 
     init() throws {
-        self.photoLibraryManager = DefaultPhotoLibraryManager()
-        self.mediaLoadingService = DefaultMediaLoadingService()
-        self.storageService = try DefaultSimilarMediaStorageService()
-        self.similarMediaManager = DefaultSimilarMediaManager(
-            photoLibraryManager: photoLibraryManager,
-            mediaLoadingService: mediaLoadingService,
-            storageService: storageService
-        )
+        let photoLibraryManager = DefaultPhotoLibraryManager()
+        let similarMediaManager = try DefaultSimilarMediaManager(mediaProvider: photoLibraryManager)
+        self.photoLibraryManager = photoLibraryManager
+        self.similarMediaManager = similarMediaManager
     }
 }

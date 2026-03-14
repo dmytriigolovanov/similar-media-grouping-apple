@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+internal import SimilarMediaKit
 
 struct GroupsView: View {
     let viewModel: GroupsViewModel
@@ -15,7 +16,7 @@ struct GroupsView: View {
         NavigationStack {
             contentView
                 .navigationTitle("Similar Media")
-                .navigationDestination(for: SimilarMediaGroup.self) { group in
+                .navigationDestination(for: SMGroup.self) { group in
                     GroupView(viewModel: GroupViewModel(group: group))
                 }
                 .overlay(alignment: .bottom) {
@@ -144,13 +145,33 @@ struct GroupsView: View {
     
     private var groupingOverlayView: some View {
         overlayContainer {
-            Text("Grouping...")
+            VStack(spacing: 4) {
+                Text(groupingStageLabel)
+                    .font(.headline)
+                if viewModel.totalMediaCount > 0 {
+                    Text("\(viewModel.processedMediaCount) / \(viewModel.totalMediaCount)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            ProgressView(value: viewModel.progressFraction)
+        }
+    }
+    
+    private var groupingStageLabel: String {
+        let fraction = viewModel.progressFraction
+        if fraction < 0.3 {
+            return "Analyzing media..."
+        } else if fraction < 1.0 {
+            return "Finding similarities..."
+        } else {
+            return "Grouping..."
         }
     }
 }
 
 private struct GroupPreviewView: View {
-    let group: SimilarMediaGroup
+    let group: SMGroup
     let thumbnail: UIImage?
     
     var body: some View {
@@ -176,7 +197,7 @@ private struct GroupPreviewView: View {
     }
     
     private var countBadge: some View {
-        Text("\(group.count)")
+        Text("\(group.assetsCount)")
             .font(.caption.bold())
             .foregroundStyle(.white)
             .padding(.horizontal, 6)

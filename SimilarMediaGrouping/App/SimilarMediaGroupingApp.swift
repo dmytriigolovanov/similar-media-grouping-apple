@@ -15,7 +15,8 @@ struct SimilarMediaGroupingApp: App {
 
     init() {
         do {
-            self.container = try AppContainer()
+            let container = try AppContainer()
+            self.container = container
             self.coordinator = AppCoordinator(container: container)
         } catch {
             fatalError("Failed to initialize AppContainer: \(error)")

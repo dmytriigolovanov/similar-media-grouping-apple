@@ -7,19 +7,20 @@
 //
 
 import Foundation
-import UIKit.UIImage
+internal import UIKit.UIImage
+internal import SimilarMediaKit
 
 @Observable
 final class GroupViewModel {
-    private let group: SimilarMediaGroup
+    private let group: SMGroup
     
     var itemsIds: [String] {
-        group.assetIdentifiers
+        group.assetIDs
     }
     
     // MARK: Init
     
-    init(group: SimilarMediaGroup) {
+    init(group: SMGroup) {
         self.group = group
     }
     

@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		B48FBE022F65E111000A5F1E /* SimilarMediaKit in Frameworks */ = {isa = PBXBuildFile; productRef = B48FBE012F65E111000A5F1E /* SimilarMediaKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		B480F5112F62B4D80060CB94 /* SimilarMediaGrouping.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SimilarMediaGrouping.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B48FBE022F65E111000A5F1E /* SimilarMediaKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = SimilarMediaGrouping;
 			packageProductDependencies = (
+				B48FBE012F65E111000A5F1E /* SimilarMediaKit */,
 			);
 			productName = SimilarMediaGrouping;
 			productReference = B480F5112F62B4D80060CB94 /* SimilarMediaGrouping.app */;
@@ -95,6 +101,9 @@
 			);
 			mainGroup = B480F5082F62B4D80060CB94;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B48FBE002F65E111000A5F1E /* XCLocalSwiftPackageReference "SimilarMediaKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B480F5122F62B4D80060CB94 /* Products */;
 			projectDirPath = "";
@@ -345,6 +354,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		B48FBE002F65E111000A5F1E /* XCLocalSwiftPackageReference "SimilarMediaKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SimilarMediaKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B48FBE012F65E111000A5F1E /* SimilarMediaKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SimilarMediaKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = B480F5092F62B4D80060CB94 /* Project object */;
 }
