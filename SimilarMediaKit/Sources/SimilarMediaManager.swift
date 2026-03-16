@@ -84,9 +84,8 @@ public final class SimilarMediaManager: Sendable {
         let storedEntries = try await storage.fetchNodeEntries()
         await nodeTable.restoreFrom(entries: storedEntries)
         
-        // 2. Load edges into graph from storage
-        let storedEdges = try await storage.fetchAllEdges()
-        try await similarityGraph.addEdges(storedEdges)
+        // 2. Load edges and processed-node set from storage (read-only, no write-back)
+        try await similarityGraph.load()
         
         // 3. Fetch assets
         let assets = try await mediaProvider.fetchAssets()
