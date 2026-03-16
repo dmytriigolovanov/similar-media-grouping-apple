@@ -15,7 +15,7 @@ final class AppContainer {
 
     init() throws {
         let photoLibraryManager = DefaultPhotoLibraryManager()
-        let similarMediaManager = try DefaultSimilarMediaManager(mediaProvider: photoLibraryManager)
+        let similarMediaManager = try SimilarMediaManager(mediaProvider: photoLibraryManager)
         self.photoLibraryManager = photoLibraryManager
         self.similarMediaManager = similarMediaManager
     }

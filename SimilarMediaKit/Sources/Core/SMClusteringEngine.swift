@@ -8,10 +8,13 @@
 
 import Foundation
 
-/// Computes groups from the similarity graph using clique-aware clustering.
-/// All methods are pure (no state) so they are safe to call from any context.
+/// Internal cluster — works with compact UInt32 node indices.
+struct SMCluster {
+    var nodes: [SMNodeIndex]
+}
+
 struct SMClusteringEngine {
-    private let configuration: SMConfiguration
+    let configuration: SMConfiguration
 
     init(configuration: SMConfiguration) {
         self.configuration = configuration
@@ -19,70 +22,87 @@ struct SMClusteringEngine {
 
     // MARK: - Public
 
-    /// Computes groups from an adjacency snapshot.
-    /// A photo joins a group only if it is similar to at least
-    /// `minimumMemberMatchRatio` of the group's existing members.
-    func computeGroups(adjacency: [String: [(id: String, distance: Float)]]) -> [SMGroup] {
+    /// Finds groups in the graph using clique-aware clustering.
+    /// Returns internal SMCluster — caller converts to SimilarMediaGroup using node table.
+    func findClusters(in graph: SMSimilarityGraph) async -> [SMCluster] {
         let threshold = configuration.similarityThreshold
         let matchRatio = configuration.minimumMemberMatchRatio
         let minSize = configuration.minimumGroupSize
 
-        // Build neighbor sets for O(1) lookup
-        var neighborSets: [String: Set<String>] = [:]
-        for (id, neighbors) in adjacency {
-            neighborSets[id] = Set(neighbors.filter { $0.distance <= threshold }.map(\.id))
+        let allNodes = await graph.allNodes()
+        guard !allNodes.isEmpty else { return [] }
+
+        // Build neighbour sets for O(1) canJoin lookups
+        var neighborSets: [SMNodeIndex: Set<SMNodeIndex>] = [:]
+        for node in allNodes {
+            let neighbours = await graph.neighborsWithDistance(of: node)
+            neighborSets[node] = Set(
+                neighbours
+                    .filter { $0.distance <= threshold }
+                    .map(\.node)
+            )
         }
 
-        // Sort by degree descending — highly connected nodes become group seeds first,
-        // producing more stable and deterministic results across runs
-        let allIDs = adjacency.keys.sorted { lhs, rhs in
-            (neighborSets[lhs]?.count ?? 0) > (neighborSets[rhs]?.count ?? 0)
+        // Sort by degree descending — highly connected nodes become seeds first
+        let sorted = allNodes.sorted {
+            (neighborSets[$0]?.count ?? 0) > (neighborSets[$1]?.count ?? 0)
         }
-        var assigned: Set<String> = []
-        var groups: [[String]] = []
 
-        for assetID in allIDs {
-            guard !assigned.contains(assetID) else {
-                continue
-            }
+        var assigned: Set<SMNodeIndex> = []
+        var clusters: [[SMNodeIndex]] = []
+        var memberToClusterIndex: [SMNodeIndex: Int] = [:]
 
-            // Try to place into existing group
+        for node in sorted {
+            guard !assigned.contains(node) else { continue }
+
+            let neighbours = neighborSets[node] ?? []
+            let candidateIndices = Set(neighbours.compactMap { memberToClusterIndex[$0] }).sorted()
+
             var placed = false
-            for i in 0..<groups.endIndex {
-                if canJoin(assetID: assetID, group: groups[i], neighborSets: neighborSets, ratio: matchRatio) {
-                    groups[i].append(assetID)
-                    assigned.insert(assetID)
+            for i in candidateIndices {
+                if canJoin(node: node, cluster: clusters[i], neighborSets: neighborSets, ratio: matchRatio) {
+                    clusters[i].append(node)
+                    assigned.insert(node)
+                    memberToClusterIndex[node] = i
                     placed = true
                     break
                 }
             }
 
-            // Start new group
             if !placed {
-                groups.append([assetID])
-                assigned.insert(assetID)
+                let newIndex = clusters.count
+                clusters.append([node])
+                assigned.insert(node)
+                memberToClusterIndex[node] = newIndex
             }
         }
 
-        return groups
+        return clusters
             .filter { $0.count >= minSize }
-            .map { SMGroup(assetIDs: $0) }
+            .map { SMCluster(nodes: $0) }
     }
 
     // MARK: - Private
 
-    /// Returns true if assetID is similar to at least `ratio` of group members
     private func canJoin(
-        assetID: String,
-        group: [String],
-        neighborSets: [String: Set<String>],
+        node: SMNodeIndex,
+        cluster: [SMNodeIndex],
+        neighborSets: [SMNodeIndex: Set<SMNodeIndex>],
         ratio: Float
     ) -> Bool {
-        guard !group.isEmpty else {
-            return true
+        guard !cluster.isEmpty else { return true }
+        let neighbours = neighborSets[node] ?? []
+        let needed = Int((ratio * Float(cluster.count)).rounded(.up))
+        var matched = 0
+
+        for (offset, member) in cluster.enumerated() {
+            if neighbours.contains(member) {
+                matched += 1
+                if matched >= needed { return true }
+            }
+            let remaining = cluster.count - offset - 1
+            if matched + remaining < needed { return false }
         }
-        let neighbors = neighborSets[assetID] ?? []
-        let matches = group.filter { neighbors.contains($0) }.count
-        return Float(matches) / Float(group.count) >= ratio
+        return false
     }
 }

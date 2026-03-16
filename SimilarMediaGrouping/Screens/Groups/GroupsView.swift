@@ -197,7 +197,7 @@ private struct GroupPreviewView: View {
     }
     
     private var countBadge: some View {
-        Text("\(group.assetsCount)")
+        Text("\(group.assetIDs.count)")
             .font(.caption.bold())
             .foregroundStyle(.white)
             .padding(.horizontal, 6)

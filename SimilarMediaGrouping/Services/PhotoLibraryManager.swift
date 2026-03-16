@@ -62,7 +62,6 @@ final class DefaultPhotoLibraryManager: PhotoLibraryManager {
         }
         return assets.map {
             SMAsset(id: $0.localIdentifier,
-                    creationDate: $0.creationDate,
                     modificationDate: $0.modificationDate)
         }
     }
@@ -72,7 +71,6 @@ final class DefaultPhotoLibraryManager: PhotoLibraryManager {
         PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject
     }
     
-    @MainActor
     func loadCGImage(for asset: SMAsset, size: CGSize) async -> CGImage? {
         guard let phAsset = fetchAsset(forLocalIdentifier: asset.id) else {
             return nil
@@ -84,8 +82,8 @@ final class DefaultPhotoLibraryManager: PhotoLibraryManager {
         options.isNetworkAccessAllowed = false
 
         return await withCheckedContinuation { continuation in
-            // Running on the main actor; PHImageManager delivers its callback on the
-            // main thread, which is where we already are — no extra hops needed.
+            // PHImageManager delivers its callback on an internal background queue when
+            // called from a non-main thread; continuation.resume is thread-safe.
             // The `resumed` guard handles the rare case where Photos fires more than once.
             nonisolated(unsafe) var resumed = false
             PHImageManager.default().requestImage(

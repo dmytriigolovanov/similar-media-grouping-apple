@@ -15,153 +15,130 @@ actor SMStorage {
         let schema = Schema([
             SMStoredEmbedding.self,
             SMStoredEdge.self,
+            SMStoredNodeEntry.self,
             SMStoredProcessingState.self
         ])
-        let config = ModelConfiguration(schema: schema,
-                                        isStoredInMemoryOnly: false,
-                                        allowsSave: true)
-        let modelContainer = try ModelContainer(for: schema,
-                                                configurations: config)
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false, allowsSave: true)
+        let modelContainer = try ModelContainer(for: schema, configurations: config)
         self.init(modelContainer: modelContainer)
     }
-    
-    // MARK: Embeddings
-    
-    func saveEmbedding(_ embedding: SMEmbedding) throws {
-        try saveEmbeddings([embedding])
+
+    // MARK: - Node Table
+
+    func fetchNodeEntries() throws -> [(assetID: String, nodeIndex: UInt32)] {
+        try modelContext.fetch(FetchDescriptor<SMStoredNodeEntry>())
+            .map { (assetID: $0.assetID, nodeIndex: $0.nodeIndex) }
     }
 
-    /// Upserts a batch of embeddings in a single transaction.
-    func saveEmbeddings(_ embeddings: [SMEmbedding]) throws {
-        guard !embeddings.isEmpty else { return }
-        let ids = embeddings.map(\.id)
+    func saveNodeEntries(_ entries: [(assetID: String, nodeIndex: UInt32)]) throws {
+        guard !entries.isEmpty else { return }
+        let assetIDs = entries.map(\.assetID)
         let existing = try modelContext.fetch(
-            FetchDescriptor<SMStoredEmbedding>(
-                predicate: #Predicate { ids.contains($0.id) }
-            )
+            FetchDescriptor<SMStoredNodeEntry>(predicate: #Predicate { assetIDs.contains($0.assetID) })
         )
-        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
-        for embedding in embeddings {
-            if let record = existingByID[embedding.id] {
-                record.update(with: embedding)
-            } else {
-                modelContext.insert(SMStoredEmbedding(from: embedding))
-            }
+        let existingIDs = Set(existing.map(\.assetID))
+        for entry in entries where !existingIDs.contains(entry.assetID) {
+            modelContext.insert(SMStoredNodeEntry(assetID: entry.assetID, nodeIndex: entry.nodeIndex))
         }
         try modelContext.save()
     }
-    
-    func fetchEmbedding(id: String) throws -> SMEmbedding? {
-        let stored = try modelContext.fetch(
-            FetchDescriptor<SMStoredEmbedding>(
-                predicate: #Predicate { $0.id == id }
-            )
-        ).first
-        return stored?.toEmbedding
-    }
-    
-    func fetchAllEmbeddings() throws -> [SMEmbedding] {
-        let stored = try modelContext.fetch(FetchDescriptor<SMStoredEmbedding>())
-        return stored.map { $0.toEmbedding }
-    }
-    
-    func deleteEmbeddings(ids: [String]) throws {
+
+    func deleteNodeEntries(for assetIDs: Set<String>) throws {
+        guard !assetIDs.isEmpty else { return }
         let records = try modelContext.fetch(
-            FetchDescriptor<SMStoredEmbedding>(
-                predicate: #Predicate { ids.contains($0.id) }
-            )
+            FetchDescriptor<SMStoredNodeEntry>(predicate: #Predicate { assetIDs.contains($0.assetID) })
         )
-        records.forEach {
-            modelContext.delete($0)
-        }
+        records.forEach { modelContext.delete($0) }
         try modelContext.save()
     }
     
-    // MARK: Edges
+    // MARK: - Processing State
     
-    func saveEdges(_ edges: [SMEdge]) throws {
-        guard !edges.isEmpty else {
-            return
-        }
-        
-        // Fetch existing edge IDs in one query to avoid duplicates
-        let edgeIDs = edges.map { $0.edgeID }
-        let existing = try modelContext.fetch(
-            FetchDescriptor<SMStoredEdge>(
-                predicate: #Predicate { edgeIDs.contains($0.edgeID) }
-            )
-        )
-        let existingIDs = Set(existing.map(\.edgeID))
-        
-        // Insert all new edges, then save once — avoids per-insert overhead
-        for edge in edges {
-            guard !existingIDs.contains(edge.edgeID) else {
-                continue
-            }
-            modelContext.insert(SMStoredEdge(from: edge))
-        }
-        try modelContext.save()
+    func fetchProcessedNodes() throws -> [SMNodeIndex] {
+        let state = try modelContext.fetch(FetchDescriptor<SMStoredProcessingState>()).first
+        return state?.processedNodes ?? []
     }
     
-    func deleteEdges(forAssetIDs ids: Set<String>) throws {
-        guard !ids.isEmpty else {
-            return
-        }
-        let records = try modelContext.fetch(
-            FetchDescriptor<SMStoredEdge>(
-                predicate: #Predicate { ids.contains($0.assetID1) || ids.contains($0.assetID2) }
-            )
-        )
-        guard !records.isEmpty else {
-            return
-        }
-        records.forEach {
-            modelContext.delete($0)
-        }
-        try modelContext.save()
-    }
-    
-    func fetchAllEdges() throws -> [SMEdge] {
-        let storedEdges = try modelContext.fetch(FetchDescriptor<SMStoredEdge>())
-        return storedEdges.map(\.toEdge)
-    }
-    
-    func deleteAllEdges() throws {
-        let all = try modelContext.fetch(FetchDescriptor<SMStoredEdge>())
-        all.forEach {
-            modelContext.delete($0)
-        }
-        try modelContext.save()
-    }
-    
-    // MARK: Processing State
-    
-    func fetchProcessingState() throws -> (lastProcessedAssetID: String?, totalAssetCount: Int?, updateDate: Date?)? {
-        let processedState = try modelContext.fetch(FetchDescriptor<SMStoredProcessingState>()).first
-        return (processedState?.lastProcessedAssetID, processedState?.totalAssetCount, processedState?.updatedAt)
-    }
-    
-    func saveProcessingState(lastProcessedAssetID: String?,
-                             totalAssetCount: Int) throws {
+    func saveProcessedNode(_ nodeIndex: SMNodeIndex) throws {
         if let existing = try modelContext.fetch(FetchDescriptor<SMStoredProcessingState>()).first {
-            existing.lastProcessedAssetID = lastProcessedAssetID
-            existing.totalAssetCount = totalAssetCount
-            existing.updatedAt = Date()
+            existing.processedNodes.append(nodeIndex)
         } else {
-            let state = SMStoredProcessingState()
-            state.lastProcessedAssetID = lastProcessedAssetID
-            state.totalAssetCount = totalAssetCount
-            state.updatedAt = Date()
+            let state = SMStoredProcessingState(processedNodes: [nodeIndex])
             modelContext.insert(state)
         }
         try modelContext.save()
     }
-    
-    func resetProcessingState() throws {
-        let all = try modelContext.fetch(FetchDescriptor<SMStoredProcessingState>())
-        all.forEach {
-            modelContext.delete($0)
+
+    // MARK: - Edges
+
+    func fetchAllEdges() throws -> [SMEdge] {
+        try modelContext.fetch(FetchDescriptor<SMStoredEdge>()).map(\.toEdge)
+    }
+
+    func saveEdges(_ edges: [SMEdge]) throws {
+        guard !edges.isEmpty else { return }
+        let keys = edges.map(\.edgeKey)
+        let existing = try modelContext.fetch(
+            FetchDescriptor<SMStoredEdge>(predicate: #Predicate { keys.contains($0.edgeKey) })
+        )
+        let existingKeys = Set(existing.map(\.edgeKey))
+        for edge in edges where !existingKeys.contains(edge.edgeKey) {
+            modelContext.insert(SMStoredEdge(edge: edge))
         }
+        try modelContext.save()
+    }
+
+    func deleteEdges(forNodes indices: Set<UInt32>) throws {
+        guard !indices.isEmpty else { return }
+        let records = try modelContext.fetch(
+            FetchDescriptor<SMStoredEdge>(
+                predicate: #Predicate { indices.contains($0.nodeIndex1) || indices.contains($0.nodeIndex2) }
+            )
+        )
+        guard !records.isEmpty else { return }
+        records.forEach { modelContext.delete($0) }
+        try modelContext.save()
+    }
+
+    func deleteAllEdges() throws {
+        let all = try modelContext.fetch(FetchDescriptor<SMStoredEdge>())
+        all.forEach { modelContext.delete($0) }
+        try modelContext.save()
+    }
+
+    // MARK: - Embeddings
+
+    func fetchStoredEmbeddings() throws -> [SMEmbedding] {
+        let stored = try modelContext.fetch(FetchDescriptor<SMStoredEmbedding>())
+        return try stored.map { try $0.toEmbedding() }
+    }
+
+    /// Save embeddings — assetIDs passed separately since SMEmbedding no longer carries them
+    func saveEmbeddings(_ embeddings: [SMEmbedding], assetIDs: [String]) throws {
+        guard !embeddings.isEmpty, embeddings.count == assetIDs.count else { return }
+        let pairs = zip(assetIDs, embeddings)
+
+        let existing = try modelContext.fetch(
+            FetchDescriptor<SMStoredEmbedding>(predicate: #Predicate { assetIDs.contains($0.assetID) })
+        )
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.assetID, $0) })
+
+        for (assetID, embedding) in pairs {
+            if let record = existingByID[assetID] {
+                try record.update(with: embedding)
+            } else {
+                modelContext.insert(try SMStoredEmbedding(from: embedding))
+            }
+        }
+        try modelContext.save()
+    }
+
+    func deleteEmbeddings(for assetIDs: Set<String>) throws {
+        guard !assetIDs.isEmpty else { return }
+        let records = try modelContext.fetch(
+            FetchDescriptor<SMStoredEmbedding>(predicate: #Predicate { assetIDs.contains($0.assetID) })
+        )
+        records.forEach { modelContext.delete($0) }
         try modelContext.save()
     }
 }

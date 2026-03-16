@@ -11,6 +11,7 @@ internal import UIKit.UIImage
 internal import SimilarMediaKit
 
 @Observable
+@MainActor
 final class GroupViewModel {
     private let group: SMGroup
     

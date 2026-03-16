@@ -7,46 +7,19 @@
 //
 
 import Foundation
-import Vision
 
-public protocol SimilarMediaManager: AnyObject, Sendable {
-    func currentGroups() async -> [SMGroup]
-    
-    func start() -> AsyncThrowingStream<SMProgress, Error>
-    func cancel()
-    func reset() async throws
-}
-
-/// Main entry point for the Similar Photos Kit.
-///
-/// Usage:
-/// ```swift
-/// let manager = try DefaultSimilarMediaManager()
-/// do {
-///     for try await progress in manager.fetchSimilarMedia() {
-///         print(progress.fractionCompleted, progress.groups.count)
-///     }
-/// } catch SMError.photoLibraryAccessDenied {
-///     // handle permission error
-/// } catch {
-///     // handle other errors
-/// }
-/// ```
-public final class DefaultSimilarMediaManager: SimilarMediaManager, Sendable {
+public final class SimilarMediaManager: Sendable {
     public let configuration: SMConfiguration
     
     private let storage: SMStorage
     private let mediaProvider: SMMediaProvider
-    private let embeddingCache: SMEmbeddingCache
-    private let distanceCalculator: SMDistanceCalculator
+    private let nodeTable: SMNodeTable
     private let similarityGraph: SMSimilarityGraph
     private let clusteringEngine: SMClusteringEngine
     
-    // nonisolated(unsafe) — mutation only happens on the calling thread
-    // before any async work begins, so this is safe
     private nonisolated(unsafe) var processingTask: Task<Void, Error>?
     
-    // MARK: Init
+    // MARK: - Init
     
     public init(configuration: SMConfiguration = SMConfiguration(),
                 mediaProvider: SMMediaProvider) throws {
@@ -54,31 +27,24 @@ public final class DefaultSimilarMediaManager: SimilarMediaManager, Sendable {
         let storage = try SMStorage()
         self.storage = storage
         self.mediaProvider = mediaProvider
-        self.embeddingCache = SMEmbeddingCache(storage: storage, mediaProvider: mediaProvider)
-        self.distanceCalculator = SMDistanceCalculator(configuration: configuration)
+        self.nodeTable = SMNodeTable()
         self.similarityGraph = SMSimilarityGraph(storage: storage)
         self.clusteringEngine = SMClusteringEngine(configuration: configuration)
     }
     
-    // MARK: Fetch
+    // MARK: - Public API
     
-    /// Starts processing and returns an AsyncThrowingStream of progress updates.
-    /// Safe to call multiple times — cancels any in-flight processing first.
     public func start() -> AsyncThrowingStream<SMProgress, Error> {
         processingTask?.cancel()
         
         return AsyncThrowingStream { continuation in
-            let task: Task<Void, Error> = Task.detached(priority: .background) { [weak self] in
-                guard let self else {
-                    return
-                }
+            let task: Task<Void, Error> = Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
                 do {
                     try await self.run(continuation: continuation)
-                }
-                catch is CancellationError {
+                } catch is CancellationError {
                     continuation.finish()
-                }
-                catch {
+                } catch {
                     continuation.finish(throwing: error)
                 }
             }
@@ -89,123 +55,112 @@ public final class DefaultSimilarMediaManager: SimilarMediaManager, Sendable {
         }
     }
     
-    /// Returns the current groups from the cached graph without triggering reprocessing.
-    /// Useful on subsequent launches when the graph is already fully built.
+    /// Returns current groups — converts internal SMCluster indices to assetIDs.
     public func currentGroups() async -> [SMGroup] {
-        let adjacency = await similarityGraph.snapshot()
-        return clusteringEngine.computeGroups(adjacency: adjacency)
+        let clusters = await clusteringEngine.findClusters(in: similarityGraph)
+        return await clusters.asyncCompactMap { cluster in
+            let assetIDs = await nodeTable.assetIDs(for: cluster.nodes)
+            guard assetIDs.count >= configuration.minimumGroupSize else { return nil }
+            return SMGroup(assetIDs: assetIDs)
+        }
     }
     
-    /// Cancels any in-progress processing.
     public func cancel() {
         processingTask?.cancel()
         processingTask = nil
     }
     
-    /// Clears all stored embeddings and edges, forcing a full reprocess on next start.
     public func reset() async throws {
         cancel()
+        await similarityGraph.clear()
         try await storage.deleteAllEdges()
-        try await storage.resetProcessingState()
     }
     
-    // MARK: Core Pipeline
+    // MARK: - Pipeline
     
     private func run(continuation: AsyncThrowingStream<SMProgress, Error>.Continuation) async throws {
-        // 1. Load graph from storage (resume support)
-        try await similarityGraph.loadFromStorage()
         
-        // 2. Fetch all assets
+        // 1. Restore node table from storage
+        let storedEntries = try await storage.fetchNodeEntries()
+        await nodeTable.restoreFrom(entries: storedEntries)
+        
+        // 2. Load edges into graph from storage
+        let storedEdges = try await storage.fetchAllEdges()
+        try await similarityGraph.addEdges(storedEdges)
+        
+        // 3. Fetch assets
         let assets = try await mediaProvider.fetchAssets()
-        let assetIDs = Set(assets.map(\.id))
         
-        // 3. Purge embeddings and graph edges for deleted assets
-        let purgedIDs = try await embeddingCache.purgeStale(keeping: assetIDs)
-        if !purgedIDs.isEmpty {
-            try await similarityGraph.removeEdges(forAssetIDs: purgedIDs)
+        // 4. Register new assets in node table
+        let newAssetIDs = await assets.asyncFilter { asset in
+            await !nodeTable.contains(asset.id)
+        }.map(\.id)
+        
+        if !newAssetIDs.isEmpty {
+            let newEntries = await nodeTable.registerAll(newAssetIDs)
+            try await storage.saveNodeEntries(newEntries)
         }
         
-        // 4. Extract embeddings (uses cache)
-        let embeddings = try await embeddingCache.embeddings(
-            for: assets,
-            progressHandler: { [weak self] done, total in
-                guard let self else {
-                    return
-                }
-                let groups = await self.currentGroups()
-                continuation.yield(SMProgress(
-                    stage: .extractingEmbeddings(completed: done, total: total),
-                    groups: groups
-                ))
-            }
-        )
+        // 5. Extract embeddings
+        let embeddingExtractor = SMEmbeddingExtractor(storage: storage,
+                                                      nodeTable: nodeTable,
+                                                      mediaProvider: mediaProvider)
+        var embeddings: [SMEmbedding] = []
+        for try await progress in await embeddingExtractor.extract(for: assets) {
+            embeddings = progress.embeddings
+            continuation.yield(await makeProgress(with: progress))
+        }
         
         try Task.checkCancellation()
         
-        // 5. Build ordered list — determines resume point
-        let orderedEmbeddings: [(id: String, observation: VNFeaturePrintObservation)] = assets
-            .compactMap { asset in
-                guard let obs = embeddings[asset.id] else {
-                    return nil
-                }
-                return (id: asset.id, observation: obs)
-            }
-        
-        // 6. Determine resume index from persisted state
-        let processingState = try await storage.fetchProcessingState()
-        let resumeIndex: Int?
-        if let lastID = processingState?.lastProcessedAssetID {
-            resumeIndex = orderedEmbeddings.firstIndex(where: { $0.id == lastID })
-        } else {
-            resumeIndex = nil
+        // 6. Build edges
+        let edgeBuilder = SMEdgeBuilder(graph: similarityGraph,
+                                        threshold: configuration.similarityThreshold)
+        for try await progress in await edgeBuilder.build(for: embeddings) {
+            continuation.yield(await makeProgress(with: progress))
         }
-        
-        try await storage.saveProcessingState(
-            lastProcessedAssetID: nil,
-            totalAssetCount: assets.count
-        )
-        
-        // 7. Compute distances — stream edges into graph as they are found,
-        //    yielding calculatingDistances progress after each chunk
-        try await distanceCalculator.computeEdges(
-            embeddings: orderedEmbeddings,
-            startingFromIndex: resumeIndex,
-            progressHandler: { [weak self] done, total in
-                guard let self else {
-                    return
-                }
-                
-                // Save resume checkpoint every 500 rows
-                if done % 500 == 0, done < orderedEmbeddings.count {
-                    let lastID = orderedEmbeddings[done].id
-                    try? await self.storage.saveProcessingState(
-                        lastProcessedAssetID: lastID,
-                        totalAssetCount: assets.count
-                    )
-                }
-                
-                let groups = await self.currentGroups()
-                continuation.yield(SMProgress(
-                    stage: .calculatingDistances(completed: done, total: total),
-                    groups: groups
-                ))
-            },
-            edgesHandler: { [weak self] edges in
-                guard let self else {
-                    return
-                }
-                try? await self.similarityGraph.addEdges(edges)
-            }
-        )
         
         try Task.checkCancellation()
         
-        // 8. Final snapshot
-        try await storage.saveProcessingState(lastProcessedAssetID: orderedEmbeddings.last?.id,
-                                              totalAssetCount: assets.count)
-        
+        // 7. Final clustering
         let finalGroups = await currentGroups()
         continuation.yield(SMProgress(stage: .done, groups: finalGroups))
         continuation.finish()
+    }
+    
+    // MARK: - Progress
+    
+    private func makeProgress(with progress: SMEdgeBuildProgress) async -> SMProgress {
+        SMProgress(
+            stage: .buildingEdges(processed: progress.processedEdgesCount, total: progress.totalEdgesCount),
+            groups: await currentGroups()
+        )
+    }
+    
+    private func makeProgress(with progress: SMEmbeddingExtractProgress) async -> SMProgress {
+        SMProgress(
+            stage: .extractingEmbeddings(completed: progress.processedCount, total: progress.totalCount),
+            groups: await currentGroups()
+        )
+    }
+}
+
+// MARK: - Async helpers
+
+private extension Array {
+    func asyncFilter(_ predicate: (Element) async -> Bool) async -> [Element] {
+        var result: [Element] = []
+        for element in self {
+            if await predicate(element) { result.append(element) }
+        }
+        return result
+    }
+    
+    func asyncCompactMap<T>(_ transform: (Element) async -> T?) async -> [T] {
+        var result: [T] = []
+        for element in self {
+            if let value = await transform(element) { result.append(value) }
+        }
+        return result
     }
 }

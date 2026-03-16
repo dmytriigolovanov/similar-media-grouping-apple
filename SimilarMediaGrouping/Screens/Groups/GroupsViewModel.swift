@@ -80,9 +80,11 @@ final class GroupsViewModel {
         groups = progress.groups
         progressFraction = progress.fractionCompleted
         switch progress.stage {
-        case .extractingEmbeddings(let completed, let total),
-             .calculatingDistances(let completed, let total):
+        case .extractingEmbeddings(let completed, let total):
             processedMediaCount = completed
+            totalMediaCount = total
+        case .buildingEdges(let processed, let total):
+            processedMediaCount = processed
             totalMediaCount = total
         case .clustering:
             break

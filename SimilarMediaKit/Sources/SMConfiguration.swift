@@ -15,16 +15,14 @@ public struct SMConfiguration: Sendable {
     public var minimumGroupSize: Int
     /// Minimum percentage of group members a photo must match to join (clique-aware)
     public var minimumMemberMatchRatio: Float
-    /// How often the UI receives a clustering snapshot (seconds)
-    public var snapshotInterval: TimeInterval
-    
-    public init(similarityThreshold: Float = 0.35,
-                minimumGroupSize: Int = 3,
-                minimumMemberMatchRatio: Float = 0.8,
-                snapshotInterval: TimeInterval = 1.0) {
+
+    public init(
+        similarityThreshold: Float = 0.25,
+        minimumGroupSize: Int = 3,
+        minimumMemberMatchRatio: Float = 0.5
+    ) {
         self.similarityThreshold = similarityThreshold
         self.minimumGroupSize = minimumGroupSize
         self.minimumMemberMatchRatio = minimumMemberMatchRatio
-        self.snapshotInterval = snapshotInterval
     }
 }

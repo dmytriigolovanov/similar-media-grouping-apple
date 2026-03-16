@@ -11,7 +11,7 @@ import Foundation
 public struct SMProgress: Sendable {
     public enum Stage: Sendable {
         case extractingEmbeddings(completed: Int, total: Int)
-        case calculatingDistances(completed: Int, total: Int)
+        case buildingEdges(processed: Int, total: Int)
         case clustering
         case done
     }
@@ -23,8 +23,8 @@ public struct SMProgress: Sendable {
         switch stage {
         case .extractingEmbeddings(let completed, let total):
             return total > 0 ? Double(completed) / Double(total) * 0.3 : 0
-        case .calculatingDistances(let completed, let total):
-            return total > 0 ? 0.3 + Double(completed) / Double(total) * 0.7 : 0.3
+        case .buildingEdges(let processed, let total):
+            return total > 0 ? 0.3 + Double(processed) / Double(total) * 0.7 : 0.3
         case .clustering, .done:
             return 1.0
         }

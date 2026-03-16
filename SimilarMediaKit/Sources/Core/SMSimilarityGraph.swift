@@ -8,71 +8,105 @@
 
 import Foundation
 
-/// In-memory adjacency list representation of the similarity graph.
+/// In-memory similarity graph backed by two compact tables:
+///
+/// - `edges:     [SMEdgeKey: Float]`          — weight per unique edge (UInt64, stored once).
+/// - `adjacency: [SMNodeIndex: [SMNodeIndex]]` — neighbour indices per node (UInt32).
+///
+/// All String ↔ UInt32 mapping is handled externally by the caller.
 /// Thread-safe via actor isolation.
 actor SMSimilarityGraph {
-
-    // adjacency: assetID → [(neighborID, distance)]
-    private var adjacency: [String: [(id: String, distance: Float)]] = [:]
     private let storage: SMStorage
-
+    
+    private var edges: [SMEdgeKey: Float] = [:]
+    private var adjacency: [SMNodeIndex: [SMNodeIndex]] = [:]
+    private var processedNodes: Set<SMNodeIndex> = []
+    
+    // MARK: Init
+    
     init(storage: SMStorage) {
         self.storage = storage
     }
+    
+    func markProcessed(_ node: SMNodeIndex) async throws {
+        processedNodes.insert(node)
+        try await storage.saveProcessedNode(node)
+    }
 
-    // MARK: Loading
+    func isProcessed(_ node: SMNodeIndex) -> Bool {
+        processedNodes.contains(node)
+    }
+    
+    func load() async throws {
+        let stored = try await storage.fetchAllEdges()
+        stored.forEach { addEdge($0) }
+        
+        let storedNodes = try await storage.fetchProcessedNodes()
+        processedNodes = Set(storedNodes)
+    }
 
-    /// Loads persisted edges from SwiftData into memory
-    func loadFromStorage() async throws {
-        let storedEdges = try await storage.fetchAllEdges()
-        for edge in storedEdges {
-            addEdgeToMemory(edge)
+    // MARK: - Mutation
+
+    func addEdge(_ edge: SMEdge) {
+        guard edges[edge.edgeKey] == nil else { return }
+        edges[edge.edgeKey] = edge.distance
+        adjacency[edge.nodeIndex1, default: []].append(edge.nodeIndex2)
+        adjacency[edge.nodeIndex2, default: []].append(edge.nodeIndex1)
+    }
+
+    func addEdges(_ newEdges: [SMEdge]) async throws {
+        for edge in newEdges {
+            addEdge(edge)
+        }
+        try await storage.saveEdges(newEdges)
+    }
+
+    func removeEdges(forNode node: SMNodeIndex) {
+        guard let neighbours = adjacency[node] else { return }
+        for neighbour in neighbours {
+            let key = SMEdge(nodeIndex1: node, nodeIndex2: neighbour, distance: 0).edgeKey
+            edges.removeValue(forKey: key)
+            adjacency[neighbour]?.removeAll { $0 == node }
+        }
+        adjacency.removeValue(forKey: node)
+    }
+
+    func clear() {
+        edges.removeAll()
+        adjacency.removeAll()
+    }
+
+    // MARK: - Read
+
+    /// O(1) — checks if edge exists
+    func hasEdge(_ edge: SMEdge) -> Bool {
+        edges[edge.edgeKey] != nil
+    }
+
+    /// O(1) — returns distance between two nodes
+    func distance(from i: SMNodeIndex, to j: SMNodeIndex) -> Float? {
+        edges[SMEdge(nodeIndex1: i, nodeIndex2: j, distance: 0).edgeKey]
+    }
+
+    /// O(degree) — returns neighbour indices
+    func neighbors(of node: SMNodeIndex) -> [SMNodeIndex] {
+        adjacency[node] ?? []
+    }
+
+    /// O(degree) — returns neighbours with distances
+    func neighborsWithDistance(of node: SMNodeIndex) -> [(node: SMNodeIndex, distance: Float)] {
+        guard let neighbours = adjacency[node] else { return [] }
+        return neighbours.compactMap { neighbour in
+            let key = SMEdge(nodeIndex1: node, nodeIndex2: neighbour, distance: 0).edgeKey
+            guard let dist = edges[key] else { return nil }
+            return (node: neighbour, distance: dist)
         }
     }
 
-    // MARK: Mutation
-
-    /// Adds a batch of edges to memory and persists them
-    func addEdges(_ edges: [SMEdge]) async throws {
-        for edge in edges {
-            addEdgeToMemory(edge)
-        }
-        try await storage.saveEdges(edges)
-    }
-
-    /// Removes all edges involving any of the given photo IDs and persists the change
-    func removeEdges(forAssetIDs ids: Set<String>) async throws {
-        for id in ids {
-            if let neighbors = adjacency[id] {
-                for neighbor in neighbors {
-                    adjacency[neighbor.id]?.removeAll { $0.id == id }
-                }
-            }
-            adjacency.removeValue(forKey: id)
-        }
-        try await storage.deleteEdges(forAssetIDs: ids)
-    }
-
-    // MARK: Read
-
-    func neighbors(of assetID: String) -> [(id: String, distance: Float)] {
-        adjacency[assetID] ?? []
-    }
-
-    func allAssetIDs() -> Set<String> {
+    func allNodes() -> Set<SMNodeIndex> {
         Set(adjacency.keys)
     }
 
-    /// Returns a snapshot of the adjacency list safe to use outside this actor
-    func snapshot() -> [String: [(id: String, distance: Float)]] {
-        adjacency
-    }
-
-    // MARK: Private
-
-    private func addEdgeToMemory(_ edge: SMEdge) {
-        adjacency[edge.assetID1, default: []].append((id: edge.assetID2, distance: edge.distance))
-        adjacency[edge.assetID2, default: []].append((id: edge.assetID1, distance: edge.distance))
-    }
+    var edgesCount: Int { edges.count }
+    var nodesCount: Int { adjacency.count }
 }
-
