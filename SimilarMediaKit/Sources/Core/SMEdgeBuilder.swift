@@ -18,29 +18,29 @@ actor SMEdgeBuilder {
     private let graph: SMSimilarityGraph
     private let threshold: Float
     private let chunkSize: Int
-
+    
     init(graph: SMSimilarityGraph,
          threshold: Float) {
         self.graph = graph
         self.threshold = threshold
         self.chunkSize = max(10, min(100, ProcessInfo.processInfo.activeProcessorCount * 8))
     }
-
+    
     // MARK: - Public
-
+    
     func build(for embeddings: [SMEmbedding]) -> AsyncThrowingStream<SMEdgeBuildProgress, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
                     let embeddingsCount = embeddings.count
                     var processedCount = 0
-
+                    
                     // Build index: assetID → (nodeIndex, embedding)
                     var embeddingByNode: [SMNodeIndex: SMEmbedding] = [:]
                     for embedding in embeddings {
                         embeddingByNode[embedding.nodeIndex] = embedding
                     }
-
+                    
                     for embedding in embeddings {
                         try Task.checkCancellation()
                         
@@ -48,9 +48,9 @@ actor SMEdgeBuilder {
                             processedCount += 1
                             continue
                         }
-
+                        
                         let sourceIdx = embedding.nodeIndex
-
+                        
                         // Filter targets — skip already computed via graph O(1)
                         var targets: [(idx: SMNodeIndex, embedding: SMEmbedding)] = []
                         for (targetIdx, targetEmbedding) in embeddingByNode {
@@ -59,7 +59,7 @@ actor SMEdgeBuilder {
                             guard await !graph.hasEdge(edge) else { continue }
                             targets.append((idx: targetIdx, embedding: targetEmbedding))
                         }
-
+                        
                         guard !targets.isEmpty else {
                             processedCount += 1
                             continuation.yield(makeProgress(
@@ -68,25 +68,25 @@ actor SMEdgeBuilder {
                             ))
                             continue
                         }
-
+                        
                         // Compute distances in parallel chunks
                         let newEdges = try await buildEdges(
                             sourceIdx: sourceIdx,
                             source: embedding,
                             targets: targets
                         )
-
+                        
                         // Add to graph
                         try await graph.addEdges(newEdges)
                         try await graph.markProcessed(sourceIdx)
-
+                        
                         processedCount += 1
                         continuation.yield(makeProgress(
                             embeddingsCount: embeddingsCount,
                             processedCount: processedCount
                         ))
                     }
-
+                    
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -94,21 +94,17 @@ actor SMEdgeBuilder {
             }
         }
     }
-
-    // MARK: - Private
-
-    private func buildEdges(
-        sourceIdx: SMNodeIndex,
-        source: SMEmbedding,
-        targets: [(idx: SMNodeIndex, embedding: SMEmbedding)]
-    ) async throws -> [SMEdge] {
+    
+    private func buildEdges(sourceIdx: SMNodeIndex,
+                            source: SMEmbedding,
+                            targets: [(idx: SMNodeIndex, embedding: SMEmbedding)]) async throws -> [SMEdge] {
         return try await withThrowingTaskGroup(of: [SMEdge].self) { group in
             for chunkStart in stride(from: 0, to: targets.count, by: chunkSize) {
                 let chunk = Array(targets[chunkStart..<min(chunkStart + chunkSize, targets.count)])
-
+                
                 group.addTask {
                     var chunkEdges: [SMEdge] = []
-
+                    
                     for target in chunk {
                         var distance: Float = 0
                         try source.observation.computeDistance(
@@ -126,7 +122,7 @@ actor SMEdgeBuilder {
                     return chunkEdges
                 }
             }
-
+            
             var result: [SMEdge] = []
             for try await edges in group {
                 result.append(contentsOf: edges)
@@ -134,33 +130,9 @@ actor SMEdgeBuilder {
             return result
         }
     }
-
-    // MARK: - Distance
-
-    private nonisolated func chiSquaredDistance(
-        _ a: [Float],
-        _ b: [Float],
-        diff: inout [Float],
-        sum: inout [Float],
-        length: Int
-    ) -> Float {
-        guard length > 0 else { return 0 }
-        let n = vDSP_Length(length)
-        var eps: Float = 1e-10
-        var result: Float = 0
-
-        vDSP_vsub(b, 1, a, 1, &diff, 1, n)
-        vDSP_vadd(a, 1, b, 1, &sum,  1, n)
-        vDSP_vsadd(sum, 1, &eps, &sum, 1, n)
-        vDSP_vmul(diff, 1, diff, 1, &diff, 1, n)
-        vDSP_vdiv(sum,  1, diff, 1, &diff, 1, n)
-        vDSP_sve(diff, 1, &result, n)
-
-        return result
-    }
-
+    
     // MARK: - Progress
-
+    
     private func makeProgress(embeddingsCount: Int, processedCount: Int) -> SMEdgeBuildProgress {
         let processed = processedCount * (2 * embeddingsCount - processedCount - 1) / 2
         let total = embeddingsCount * (embeddingsCount - 1) / 2

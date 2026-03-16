@@ -20,8 +20,7 @@ let package = Package(
                 .linkedFramework("Photos"),
                 .linkedFramework("Vision"),
                 .linkedFramework("SwiftData"),
-                .linkedFramework("CoreGraphics"),
-                .linkedFramework("Accelerate")
+                .linkedFramework("CoreGraphics")
             ]
         ),
 
