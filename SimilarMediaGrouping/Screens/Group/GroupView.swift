@@ -18,11 +18,8 @@ struct GroupView: View {
     ]
     
     var body: some View {
-        NavigationStack {
-            contentView
-                .navigationTitle("Group")
-        }
-
+        contentView
+            .navigationTitle("Group")
     }
         
     private var contentView: some View {
@@ -41,23 +38,15 @@ private struct GroupItemView: View {
     let thumbnail: UIImage?
     
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            thumbnailView
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipped()
-    }
-    
-    @ViewBuilder
-    private var thumbnailView: some View {
-        if let thumbnail {
-            Image(uiImage: thumbnail)
-                .resizable()
-                .scaledToFit()
-        }
-        else {
-            Rectangle()
-                .fill(Color(.systemFill))
-        }
+        Color(.systemFill)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                }
+            }
+            .clipped()
     }
 }

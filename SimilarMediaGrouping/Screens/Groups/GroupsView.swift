@@ -17,7 +17,7 @@ struct GroupsView: View {
             contentView
                 .navigationTitle("Similar Media")
                 .navigationDestination(for: SMGroup.self) { group in
-                    GroupView(viewModel: GroupViewModel(group: group))
+                    GroupView(viewModel: viewModel.groupViewModel(for: group))
                 }
                 .overlay(alignment: .bottom) {
                     overlayView
@@ -175,25 +175,19 @@ private struct GroupPreviewView: View {
     let thumbnail: UIImage?
     
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            thumbnailView
-            countBadge
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .clipped()
-    }
-    
-    @ViewBuilder
-    private var thumbnailView: some View {
-        if let thumbnail {
-            Image(uiImage: thumbnail)
-                .resizable()
-                .scaledToFit()
-        }
-        else {
-            Rectangle()
-                .fill(Color(.systemFill))
-        }
+        Color(.systemFill)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                countBadge
+            }
+            .clipped()
     }
     
     private var countBadge: some View {

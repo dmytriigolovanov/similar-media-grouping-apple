@@ -21,6 +21,7 @@ enum GroupsViewState {
 @MainActor
 final class GroupsViewModel {
     private let similarMediaManager: SimilarMediaManager
+    private let photoLibraryManager: PhotoLibraryManager
     
     private(set) var state: GroupsViewState = .loading
     private(set) var groups: [SMGroup] = []
@@ -37,14 +38,36 @@ final class GroupsViewModel {
     
     // MARK: Init
     
-    init(similarMediaManager: SimilarMediaManager) {
+    init(similarMediaManager: SimilarMediaManager, photoLibraryManager: PhotoLibraryManager) {
         self.similarMediaManager = similarMediaManager
+        self.photoLibraryManager = photoLibraryManager
     }
     
     // MARK: Images
     
+    private var thumbnails: [String: UIImage] = [:]
+    private var loadingIDs: Set<String> = []
+    
     func thumbnail(for group: SMGroup) -> UIImage? {
-        // TODO: Add thumbnail loading
+        guard let firstID = group.assetIDs.first else { return nil }
+        return loadThumbnail(for: firstID)
+    }
+    
+    private func loadThumbnail(for assetID: String) -> UIImage? {
+        if let cached = thumbnails[assetID] { return cached }
+        guard !loadingIDs.contains(assetID) else { return nil }
+        loadingIDs.insert(assetID)
+        Task { [weak self] in
+            guard let self else { return }
+            let asset = SMAsset(id: assetID, modificationDate: nil)
+            if let cgImage = await self.photoLibraryManager.loadCGImage(
+                for: asset,
+                size: CGSize(width: 512, height: 512)
+            ) {
+                self.thumbnails[assetID] = UIImage(cgImage: cgImage)
+            }
+            self.loadingIDs.remove(assetID)
+        }
         return nil
     }
     
@@ -91,5 +114,9 @@ final class GroupsViewModel {
         case .done:
             processedMediaCount = totalMediaCount
         }
+    }
+    
+    func groupViewModel(for group: SMGroup) -> GroupViewModel {
+        GroupViewModel(group: group, photoLibraryManager: photoLibraryManager)
     }
 }

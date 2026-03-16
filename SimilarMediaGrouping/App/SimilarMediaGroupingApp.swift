@@ -47,7 +47,8 @@ struct SimilarMediaGroupingApp: App {
     private var groupsView: some View {
         GroupsView(
             viewModel: GroupsViewModel(
-                similarMediaManager: container.similarMediaManager
+                similarMediaManager: container.similarMediaManager,
+                photoLibraryManager: container.photoLibraryManager
             )
         )
     }
